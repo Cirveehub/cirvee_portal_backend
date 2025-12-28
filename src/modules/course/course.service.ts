@@ -367,7 +367,7 @@ export class CourseService {
       ]);
   
       // Add calculated fields
-      const cohortsWithCalculations = cohorts.map((cohort) => ({
+      const cohortsWithCalculations = cohorts.map((cohort:any) => ({
         ...cohort,
         calculatedStatus: this.calculateCohortStatus(
           cohort.startDate,

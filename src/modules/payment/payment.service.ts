@@ -3,7 +3,7 @@ import axios from "axios";
 import crypto from "crypto";
 import { BadRequestError, NotFoundError, ForbiddenError } from "@utils/httpErrors";
 import logger from "@utils/logger";
-import { InstallmentPlan, PaymentState, Prisma } from "@prisma/client";
+import { InstallmentPlan, PaymentState, Prisma, PrismaClient } from "@prisma/client";
 
 type InitiatePaymentResult = {
   payment: {
@@ -206,7 +206,7 @@ export class PaymentService {
     }
 
     // Get cohort details
-    const cohort = await prisma.$transaction(async (tx) => {
+    const cohort = await prisma.$transaction(async (tx:PrismaClient) => {
       return await tx.cohort.findUnique({
         where: { id: data.cohortId },
         include: {
@@ -303,7 +303,7 @@ export class PaymentService {
     }
 
     // Create payment record with transaction
-    const payment = await prisma.$transaction(async (tx) => {
+    const payment = await prisma.$transaction(async (tx:PrismaClient) => {
       const newPayment = await tx.payment.create({
         data: {
           reference,
@@ -406,7 +406,7 @@ export class PaymentService {
   
   static async verifyPayment(reference: string, webhookData?: any) {
     // Get payment
-    const payment = await prisma.$transaction(async (tx) => {
+    const payment = await prisma.$transaction(async (tx:PrismaClient) => {
   return await tx.payment.findUnique({
     where: { reference },
     include: {
@@ -459,7 +459,7 @@ export class PaymentService {
     const paystackData = verification.data;
 
     // Update payment in transaction
-    const updatedPayment = await prisma.$transaction(async (tx) => {
+    const updatedPayment = await prisma.$transaction(async (tx:PrismaClient) => {
       // Check payment status from Paystack
       if (paystackData.status !== "success") {
         // Payment failed
@@ -710,7 +710,7 @@ export class PaymentService {
     const paystackResponse = await this.callPaystack("/transaction/initialize", "POST", paystackPayload);
 
     // Create transaction record
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx:PrismaClient) => {
       await tx.paymentTransaction.create({
         data: {
           paymentId: payment.id,
@@ -825,7 +825,7 @@ export class PaymentService {
     ]);
 
     // Format amounts for response
-    const formattedPayments = payments.map(p => ({
+    const formattedPayments = payments.map((p:any) => ({
       ...p,
       totalAmount: MoneyUtils.formatNaira(p.totalAmountKobo),
       paidAmount: MoneyUtils.formatNaira(p.paidAmountKobo),
@@ -888,7 +888,7 @@ export class PaymentService {
       balance: MoneyUtils.formatNaira(payment.balanceKobo),
       firstInstallment: payment.firstInstallmentKobo ? MoneyUtils.formatNaira(payment.firstInstallmentKobo) : null,
       secondInstallment: payment.secondInstallmentKobo ? MoneyUtils.formatNaira(payment.secondInstallmentKobo) : null,
-      transactions: payment.transactions.map(t => ({
+      transactions: payment.transactions.map((t:any) => ({
         ...t,
         amount: MoneyUtils.formatNaira(t.amountKobo),
       })),
@@ -911,7 +911,7 @@ export class PaymentService {
       throw new NotFoundError("Payment not found");
     }
 
-    const updatedPayment = await prisma.$transaction(async (tx) => {
+    const updatedPayment = await prisma.$transaction(async (tx:PrismaClient) => {
       const updated = await tx.payment.update({
         where: { id: paymentId },
         data: {

@@ -169,7 +169,7 @@ export class AttendanceService {
 
     //  Calculate attendance percentage
     const totalStudents = cohort.enrollments.length;
-    const studentsWithLogs = new Set(logs.map(l => l.userId)).size;
+    const studentsWithLogs = new Set(logs.map((l:any) => l.userId)).size;
     const attendancePercentage = totalStudents > 0 ? (studentsWithLogs / totalStudents) * 100 : 0;
 
     return {
