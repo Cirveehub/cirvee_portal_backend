@@ -6,7 +6,7 @@
   "scripts": {
     "postinstall": "prisma generate",
     "dev": "prisma generate && nodemon --exec ts-node --transpile-only -r tsconfig-paths/register --files src/server.ts",
-    "build": "prisma generate && tsc",
+    "build": "tsc",
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
