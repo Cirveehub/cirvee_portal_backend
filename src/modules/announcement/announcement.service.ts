@@ -2,6 +2,7 @@ import prisma from "@config/database";
 import { Prisma } from "@prisma/client";
 import { ForbiddenError, NotFoundError } from "@utils/httpErrors";
 import logger from "@utils/logger";
+import { QueueService } from "../../services/queue.service";
 
 type StaffRole = "SUPER_ADMIN" | "ADMIN" | "TUTOR";
 
@@ -204,6 +205,58 @@ export class AnnouncementService {
       `Announcement '${announcement.title}' created by ${role} ${userId} | ` +
       `Global: ${data.isGlobal} | Cohorts: ${data.cohortIds?.length || 0}`
     );
+
+    // Send Email Notification
+    // 1. Identify Recipients
+    let recipientIds: string[] = [];
+
+    if (data.isGlobal) {
+        // Warning: This could be large. Ideally use a bulk job or separate worker process.
+        // For now, fetching all active students.
+        const students = await prisma.user.findMany({
+            where: { role: 'STUDENT', isActive: true },
+            select: { id: true, email: true, firstName: true }
+        });
+        
+        for (const student of students) {
+             await QueueService.addEmailJob({
+                type: 'ANNOUNCEMENT_NEW',
+                payload: {
+                    email: student.email,
+                    name: student.firstName,
+                    title: announcement.title,
+                    content: announcement.content,
+                    senderName: role === 'ADMIN' || role === 'SUPER_ADMIN' ? 'Admin' : 'Tutor' // Or fetch specific name
+                }
+            });
+        }
+    } else if (data.cohortIds && data.cohortIds.length > 0) {
+        // Fetch students in these cohorts
+        const enrollments = await prisma.enrollment.findMany({
+            where: {
+                cohortId: { in: data.cohortIds },
+                status: 'ACTIVE'
+            },
+            include: {
+                student: { include: { user: true } }
+            },
+            distinct: ['studentId'] // Prevent duplicates if student is in multiple cohorts (unlikely but safe)
+        });
+
+        for (const enrollment of enrollments) {
+            const student = enrollment.student.user;
+            await QueueService.addEmailJob({
+                type: 'ANNOUNCEMENT_NEW',
+                payload: {
+                    email: student.email,
+                    name: student.firstName,
+                    title: announcement.title,
+                    content: announcement.content,
+                    senderName: role === 'ADMIN' || role === 'SUPER_ADMIN' ? 'Admin' : 'Tutor'
+                }
+            });
+        }
+    }
 
     return announcement;
   }

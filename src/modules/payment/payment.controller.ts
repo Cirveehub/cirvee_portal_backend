@@ -5,6 +5,7 @@ import prisma from "@config/database";
 import logger from "@utils/logger";
 import { InstallmentPlan, PaymentState } from "@prisma/client";
 import { AuthRequest } from "../../types";
+import { ResponseUtil } from "@utils/response";
 
 export class PaymentController {
   
@@ -15,7 +16,7 @@ export class PaymentController {
   static async initiatePayment(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;
-      const { cohortId, fullName, phoneNumber, installmentPlan, metadata } = req.body;
+      const { cohortId, fullName, phoneNumber, installmentPlan, metadata, amount } = req.body;
 
       // Get student record
       const student = await prisma.student.findUnique({
@@ -24,10 +25,9 @@ export class PaymentController {
       });
 
       if (!student) {
-        return res.status(400).json({
-          success: false,
-          message: "Student record not found. Please complete your profile.",
-        });
+        return ResponseUtil.badRequest(
+          res,
+        );
       }
 
       // Get user email
@@ -50,14 +50,15 @@ export class PaymentController {
         phoneNumber,
         installmentPlan: installmentPlan as InstallmentPlan,
         metadata,
+        amount: Number(amount),
       }, ipAddress);
 
       logger.info(`Payment initiated by student ${student.studentId}: ${result.reference}`);
 
-      return res.status(201).json({
-        success: true,
-        message: "Payment initiated successfully. Please complete payment using the provided link.",
-        data: {
+      return ResponseUtil.success(
+        res,
+        "Payment initiated successfully. Please complete payment using the provided link.",
+        {
           paymentId: result.payment.id,
           reference: result.reference,
           authorizationUrl: result.authorizationUrl,
@@ -73,10 +74,15 @@ export class PaymentController {
             secondInstallmentDueDate: result.payment.secondInstallmentDueDate,
           } : null,
         },
-      });
+      );
     } catch (error: any) {
       logger.error(`Payment initiation error: ${error.message}`, { error, userId: req.user?.id });
-      next(error);
+      // next(error);
+      return ResponseUtil.error(
+        res,
+        error.message || "Payment initiation failed",
+        error.statusCode || 500
+      );
     }
   }
 
@@ -87,22 +93,22 @@ export class PaymentController {
       const { reference } = req.query;
 
       if (!reference || typeof reference !== "string") {
-        return res.status(400).json({
-          success: false,
-          message: "Payment reference is required",
-        });
+        return ResponseUtil.badRequest(
+          res,
+          "Payment reference is required",
+        );
       }
 
       const payment = await PaymentService.verifyPayment(reference);
 
-      return res.status(200).json({
-        success: true,
-        message: payment.status === "COMPLETED" 
+      return ResponseUtil.success(
+        res,
+        payment.status === "COMPLETED" 
           ? "Payment verified and completed successfully! You are now enrolled." 
           : payment.status === "PROCESSING"
           ? "First installment received. Please pay the second installment to complete enrollment."
           : "Payment verification completed.",
-        data: {
+        {
           id: payment.id,
           reference: payment.reference,
           status: payment.status,
@@ -125,10 +131,14 @@ export class PaymentController {
             startDate: payment.cohort.startDate,
           },
         },
-      });
+      );
     } catch (error: any) {
       logger.error(`Payment verification error: ${error.message}`, { error });
-      next(error);
+      return ResponseUtil.error(
+        res,
+        error.message || "Payment verification failed",
+        error.statusCode || 500
+      );
     }
   }
 
@@ -147,10 +157,10 @@ export class PaymentController {
       });
 
       if (!student) {
-        return res.status(400).json({
-          success: false,
-          message: "Student record not found",
-        });
+        return ResponseUtil.badRequest(
+          res,
+          "Student record not found",
+        );
       }
 
       const result = await PaymentService.listPayments({
@@ -159,15 +169,22 @@ export class PaymentController {
         limit,
       });
 
-      return res.status(200).json({
-        success: true,
-        message: "Payments retrieved successfully",
-        data: result.data,
-        pagination: result.pagination,
-      });
+      return ResponseUtil.paginated(
+        res,
+        "Payments retrieved successfully",
+        result.data,
+        result.pagination.page,
+        result.pagination.limit,
+        result.pagination.total,
+        // result.pagination,
+      );
     } catch (error: any) {
       logger.error(`Get my payments error: ${error.message}`, { error, userId: req.user?.id });
-      next(error);
+      return ResponseUtil.error(
+        res,
+        error.message || "Failed to retrieve payments",
+        error.statusCode || 500
+      );
     }
   }
 
@@ -180,14 +197,18 @@ export class PaymentController {
 
       const payment = await PaymentService.getPaymentDetails(id, userId, false);
 
-      return res.status(200).json({
-        success: true,
-        message: "Payment details retrieved successfully",
-        data: payment,
-      });
+      return ResponseUtil.success(
+        res,
+        "Payment details retrieved successfully",
+        payment,
+      );
     } catch (error: any) {
       logger.error(`Get payment details error: ${error.message}`, { error });
-      next(error);
+      return ResponseUtil.error(
+        res,
+        error.message || "Failed to retrieve payment details",
+        error.statusCode || 500
+      );
     }
   }
 
@@ -200,14 +221,19 @@ export class PaymentController {
 
       const result = await PaymentService.initiateSecondInstallment(id, userId);
 
-      return res.status(200).json({
-        success: true,
-        message: "Second installment payment initiated successfully",
-        data: result,
-      });
+      return ResponseUtil.success(
+        res,
+        "Second installment payment initiated successfully",
+        result,
+      );
     } catch (error: any) {
       logger.error(`Second installment initiation error: ${error.message}`, { error });
-      next(error);
+      // next(error);
+      return ResponseUtil.error(
+        res,
+        error.message || "Failed to initiate second installment payment",
+        error.statusCode || 500
+      );
     }
   }
 
@@ -243,15 +269,21 @@ export class PaymentController {
 
       const result = await PaymentService.listPayments(filters);
 
-      return res.status(200).json({
-        success: true,
-        message: "Payments retrieved successfully",
-        data: result.data,
-        pagination: result.pagination,
-      });
+      return ResponseUtil.paginated(
+        res,
+        "Payments retrieved successfully",
+        result.data,
+        result.pagination.page,
+        result.pagination.limit,
+        result.pagination.total,
+      );
     } catch (error: any) {
       logger.error(`List all payments error: ${error.message}`, { error });
-      next(error);
+      return ResponseUtil.error(
+        res,
+        error.message || "Failed to list payments",
+        error.statusCode || 500
+      );
     }
   }
 
@@ -263,14 +295,18 @@ export class PaymentController {
 
       const payment = await PaymentService.getPaymentDetails(id, undefined, true);
 
-      return res.status(200).json({
-        success: true,
-        message: "Payment details retrieved successfully",
-        data: payment,
-      });
+      return ResponseUtil.success(
+        res,
+        "Payment details retrieved successfully",
+        payment,
+      );
     } catch (error: any) {
       logger.error(`Get payment details admin error: ${error.message}`, { error });
-      next(error);
+      return ResponseUtil.error(
+        res,
+        error.message || "Failed to retrieve payment details",
+        error.statusCode || 500
+      );
     }
   }
 
@@ -289,14 +325,18 @@ export class PaymentController {
         notes
       );
 
-      return res.status(200).json({
-        success: true,
-        message: "Payment status updated successfully",
-        data: payment,
-      });
+      return ResponseUtil.success(
+        res,
+        "Payment status updated successfully",
+        payment,
+      );
     } catch (error: any) {
       logger.error(`Update payment status error: ${error.message}`, { error });
-      next(error);
+      return ResponseUtil.error(
+        res,
+        error.message || "Failed to update payment status",
+        error.statusCode || 500
+      );
     }
   }
 
@@ -314,14 +354,18 @@ export class PaymentController {
 
       const stats = await PaymentService.getPaymentStatistics(filters);
 
-      return res.status(200).json({
-        success: true,
-        message: "Payment statistics retrieved successfully",
-        data: stats,
-      });
+      return ResponseUtil.success(
+        res,
+        "Payment statistics retrieved successfully",
+        stats,
+      );
     } catch (error: any) {
       logger.error(`Get payment statistics error: ${error.message}`, { error });
-      next(error);
+      return ResponseUtil.error(
+        res,
+        error.message || "Failed to retrieve payment statistics",
+        error.statusCode || 500
+      );
     }
   }
 }

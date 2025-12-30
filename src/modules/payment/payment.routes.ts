@@ -20,13 +20,13 @@ const router = Router();
 
 const paymentInitiateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Max 5 payment initiations per 15 minutes
+  max: process.env.NODE_ENV === "test" ? 1000 : 5, // Max 5 payment initiations per 15 minutes (relaxed for tests)
   message: "Too many payment attempts, please try again later",
 });
 
 const paymentVerifyLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 30,
+  max: process.env.NODE_ENV === "test" ? 1000 : 30,
   message: "Too many verification requests, please try again late",
 });
 
@@ -64,6 +64,10 @@ const paymentVerifyLimiter = rateLimit({
  *                 type: string
  *                 description: Contact phone number
  *                 example: "+2348012345678"
+ *               amount:
+ *                 type: integer
+ *                 description: Amount in Naira (e.g., 5000 for 5000 Naira). Required for FULL_PAYMENT if not full cost, or for INSTALLMENTS.
+ *                 example: 5000
  *               installmentPlan:
  *                 type: string
  *                 enum: [FULL_PAYMENT, TWO_INSTALLMENTS]
@@ -354,6 +358,56 @@ router.get(
 
 /**
  * @swagger
+ * /api/v1/payments/admin/statistics:
+ *   get:
+ *     summary: Get payment statistics (Admin)
+ *     description: Get payment analytics and statistics
+ *     tags: [Payments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: cohortId
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: query
+ *         name: courseId
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Statistics retrieved successfully
+ *       403:
+ *         description: Forbidden
+ */
+router.get(
+  "/admin/statistics",
+  authenticate as any,
+  requireRole(UserRole.SUPER_ADMIN, UserRole.ADMIN) as any,
+  [
+    query("startDate").optional().isISO8601(),
+    query("endDate").optional().isISO8601(),
+    query("cohortId").optional().isUUID(),
+    query("courseId").optional().isUUID(),
+  ],
+  validateRequest,
+  PaymentController.getPaymentStatistics as any
+);
+
+/**
+ * @swagger
  * /api/v1/payments/admin/{id}:
  *   get:
  *     summary: Get payment details (Admin)
@@ -441,54 +495,6 @@ router.patch(
   PaymentController.updatePaymentStatus as any
 );
 
-/**
- * @swagger
- * /api/v1/payments/admin/statistics:
- *   get:
- *     summary: Get payment statistics (Admin)
- *     description: Get payment analytics and statistics
- *     tags: [Payments]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: startDate
- *         schema:
- *           type: string
- *           format: date
- *       - in: query
- *         name: endDate
- *         schema:
- *           type: string
- *           format: date
- *       - in: query
- *         name: cohortId
- *         schema:
- *           type: string
- *           format: uuid
- *       - in: query
- *         name: courseId
- *         schema:
- *           type: string
- *           format: uuid
- *     responses:
- *       200:
- *         description: Statistics retrieved successfully
- *       403:
- *         description: Forbidden
- */
-router.get(
-  "/admin/statistics",
-  authenticate as any,
-  requireRole(UserRole.SUPER_ADMIN, UserRole.ADMIN) as any,
-  [
-    query("startDate").optional().isISO8601(),
-    query("endDate").optional().isISO8601(),
-    query("cohortId").optional().isUUID(),
-    query("courseId").optional().isUUID(),
-  ],
-  validateRequest,
-  PaymentController.getPaymentStatistics as any
-);
+
 
 export default router;

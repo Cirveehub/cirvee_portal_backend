@@ -1,6 +1,7 @@
 import prisma from "@config/database";
 import { uploadToCloudinary, removeFromCloudinary } from "../../utils/cloudinary";
 import { Assignment, AssignmentSubmission } from "@prisma/client";
+import { QueueService } from "../../services/queue.service";
 
 export class AssignmentService {
   // Create a new assignment
@@ -26,7 +27,7 @@ export class AssignmentService {
       }
     }
 
-    return prisma.assignment.create({
+    const assignment = await prisma.assignment.create({
       data: {
         cohortId: data.cohortId,
         tutorId: data.tutorId,
@@ -46,9 +47,46 @@ export class AssignmentService {
               }
             }
           }
+        },
+        cohort: {
+            select: {
+                course: {
+                    select: { title: true }
+                }
+            }
         }
       }
     });
+
+    // Notify Students
+    // Fetch all students in the cohort who are active
+    const students = await prisma.enrollment.findMany({
+        where: { 
+            cohortId: data.cohortId,
+            status: 'ACTIVE'
+        },
+        include: {
+            student: {
+                include: { user: true }
+            }
+        }
+    });
+
+    for (const enrollment of students) {
+        const student = enrollment.student.user;
+        await QueueService.addEmailJob({
+            type: 'ASSIGNMENT_CREATED',
+            payload: {
+                email: student.email,
+                studentName: student.firstName,
+                assignmentTitle: assignment.title,
+                courseTitle: assignment.cohort.course.title,
+                dueDate: assignment.dueDate
+            }
+        });
+    }
+
+    return assignment;
   }
 
   // Submit an assignment

@@ -1,0 +1,67 @@
+npm warn Unknown user config "fetch-retry-mintime". This will stop working in the next major version of npm.
+npm warn Unknown user config "fetch-retry-maxtime". This will stop working in the next major version of npm.
+
+> portal_backend@1.0.0 test
+> dotenv -e .env.test -- jest --runInBand --detectOpenHandles src/tests/queue.test.ts
+
+  console.log
+    [dotenv@17.2.3] injecting env (0) from .env.test -- tip: ≡ƒöæ add access controls to secrets: https://dotenvx.com/ops
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+2025-12-30 09:00:57 [32minfo[39m: Redis connected 
+2025-12-30 09:00:57 [32minfo[39m: Redis is ready to accept commands
+  console.log
+    Job added: 1
+
+      at Object.<anonymous> (src/tests/queue.test.ts:34:17)
+
+2025-12-30 09:01:04 [32minfo[39m: Processing email job 2 of type ASSIGNMENT_CREATED
+2025-12-30 09:01:04 [32minfo[39m: Email job 2 completed
+FAIL src/tests/queue.test.ts (26.898 s)
+  Email Queue Integration
+    ├ù should process email jobs (5271 ms)
+    ΓêÜ should process assignment creation emails (5263 ms)
+    ├ù should process announcement emails (5262 ms)
+
+  ΓùÅ Email Queue Integration ΓÇ║ should process email jobs
+
+    expect(jest.fn()).toHaveBeenCalledWith(...expected)
+
+    Expected: "test@queue.com", "Queue Test", "123456"
+
+    Number of calls: 0
+
+      36 |         await new Promise(resolve => setTimeout(resolve, 5000));
+      37 |
+    > 38 |         expect(sendSpy).toHaveBeenCalledWith(payload.email, payload.name, payload.otp);
+         |                         ^
+      39 |     }, 20000);
+      40 |
+      41 |     it("should process assignment creation emails", async () => {
+
+      at Object.<anonymous> (src/tests/queue.test.ts:38:25)
+
+  ΓùÅ Email Queue Integration ΓÇ║ should process announcement emails
+
+    expect(jest.fn()).toHaveBeenCalledWith(...expected)
+
+    Expected: "student@test.com", "Student", "Test Announcement", "Content", "Admin"
+
+    Number of calls: 0
+
+      84 |         await new Promise(resolve => setTimeout(resolve, 5000));
+      85 |
+    > 86 |         expect(sendSpy).toHaveBeenCalledWith(
+         |                         ^
+      87 |             payload.email, 
+      88 |             payload.name, 
+      89 |             payload.title, 
+
+      at Object.<anonymous> (src/tests/queue.test.ts:86:25)
+
+Test Suites: 1 failed, 1 total
+Tests:       2 failed, 1 passed, 3 total
+Snapshots:   0 total
+Time:        27.726 s, estimated 30 s
+Ran all test suites matching src/tests/queue.test.ts.

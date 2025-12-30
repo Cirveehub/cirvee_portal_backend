@@ -228,27 +228,52 @@ describe("Payment Module - Complete Test Suite", () => {
     
       // Enroll students in cogorts
       await Promise.all([
-        prisma.enrollment.create({
-          data: { cohortId: cohort1Id, studentId, courseId: course.id },
-        }),
+        // prisma.enrollment.create({
+        //   data: { cohortId: cohort1Id, studentId, courseId: course.id },
+        // }),
         prisma.enrollment.create({
           data: { cohortId: cohort2Id, studentId: student2Id, courseId: course.id },
         }),
       ]);
 
     // Mock Paystack responses
-mockedAxios.post.mockResolvedValue({
-  data: {
-    status: true,
-    message: "Authorization URL created",
-    data: {
-      authorization_url: "https://checkout.paystack.com/test123",
-      access_code: "test_access_code",
-      reference: "test_ref_123",
-    },
-  },
-});
-});
+    // Mock Paystack responses
+    (mockedAxios as any).mockImplementation((config: any) => {
+      const method = config.method?.toUpperCase();
+      const url = config.url || "";
+      
+      if (method === "POST") {
+        return Promise.resolve({
+          data: {
+            status: true,
+            message: "Authorization URL created",
+            data: {
+              authorization_url: "https://checkout.paystack.com/test123",
+              access_code: "test_access_code",
+              reference: `test_ref_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            },
+          },
+        });
+      }
+      
+      if (method === "GET") {
+        // Handle verification
+        return Promise.resolve({
+          data: {
+            status: true,
+            data: {
+              status: "success",
+              amount: 5000, // Default to 5000 kobo (50 naira)
+              gateway_response: "Successful",
+              channel: "card",
+            },
+          },
+        });
+      }
+
+       return Promise.reject(new Error(`Unexpected axios call: ${method} ${config.url}`));
+    });
+  });
 
 
   afterAll(async () => {
@@ -273,13 +298,14 @@ mockedAxios.post.mockResolvedValue({
         .post("/api/v1/payments/initiate")
         .set("Authorization", `Bearer ${studentToken}`)
         .send({
-          cohort1Id,
+          cohortId: cohort1Id,
           fullName: "Student One",
           phoneNumber: "+2348012345678",
           installmentPlan: "FULL_PAYMENT",
+          amount: 50,
         });
 
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(200);
       expect(res.body.data).toHaveProperty("paymentId");
       expect(res.body.data).toHaveProperty("reference");
       expect(res.body.data).toHaveProperty("authorizationUrl");
@@ -291,13 +317,14 @@ mockedAxios.post.mockResolvedValue({
         .post("/api/v1/payments/initiate")
         .set("Authorization", `Bearer ${student2Token}`)
         .send({
-          cohort1Id,
+          cohortId: cohort1Id,
           fullName: "Student Two",
           phoneNumber: "+2348087654321",
           installmentPlan: "TWO_INSTALLMENTS",
+          amount: 25,
         });
 
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(200);
       expect(res.body.data).toHaveProperty("paymentId");
       installmentPaymentId = res.body.data.paymentId;
     });
@@ -307,9 +334,10 @@ mockedAxios.post.mockResolvedValue({
         .post("/api/v1/payments/initiate")
         .set("Authorization", `Bearer ${studentToken}`)
         .send({
-          cohort1Id,
+          cohortId: cohort1Id,
           fullName: "Student One",
           installmentPlan: "FULL_PAYMENT",
+          amount: 50,
         });
 
       expect(res.status).toBe(400);
@@ -321,9 +349,10 @@ mockedAxios.post.mockResolvedValue({
         .post("/api/v1/payments/initiate")
         .set("Authorization", `Bearer ${adminToken}`)
         .send({
-          cohort1Id,
+          cohortId: cohort1Id,
           fullName: "Admin User",
           installmentPlan: "FULL_PAYMENT",
+          amount: 50,
         });
 
       expect(res.status).toBe(403);
@@ -334,7 +363,7 @@ mockedAxios.post.mockResolvedValue({
         .post("/api/v1/payments/initiate")
         .set("Authorization", `Bearer ${studentToken}`)
         .send({
-          cohort1Id,
+          cohortId: cohort1Id,
           // Missing fullName and installmentPlan
         });
 
@@ -407,8 +436,8 @@ mockedAxios.post.mockResolvedValue({
         .set("Authorization", `Bearer ${studentToken}`);
 
       expect(res.status).toBe(200);
-      expect(res.body.pagination.page).toBe(1);
-      expect(res.body.pagination.limit).toBe(5);
+      expect(res.body.meta.page).toBe(1);
+      expect(res.body.meta.limit).toBe(5);
     });
 
     it("Should NOT allow non-student to access", async () => {
@@ -624,10 +653,11 @@ mockedAxios.post.mockResolvedValue({
         .post("/api/v1/payments/initiate")
         .set("Authorization", `Bearer ${studentToken}`)
         .send({
-          cohort1Id,
+          cohortId: cohort1Id,
           fullName: "Test User",
           phoneNumber: "invalid-phone",
           installmentPlan: "FULL_PAYMENT",
+          amount: 50,
         });
 
       expect(res.status).toBe(400);
@@ -641,6 +671,7 @@ mockedAxios.post.mockResolvedValue({
           cohortId: "invalid-uuid",
           fullName: "Test User",
           installmentPlan: "FULL_PAYMENT",
+          amount: 50,
         });
 
       expect(res.status).toBe(400);

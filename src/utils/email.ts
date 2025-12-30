@@ -144,4 +144,117 @@ static async sendStaffCredentialsEmail(
 
   }
 }
+  static async sendPaymentReminderEmail(
+    email: string,
+    firstName: string,
+    courseTitle: string,
+    balanceKobo: number,
+    dueDate?: Date
+  ): Promise<void> {
+    try {
+      const formattedBalance = `₦${(balanceKobo / 100).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const dueDateStr = dueDate ? new Date(dueDate).toLocaleDateString() : "ASAP";
+      const paymentLink = `${process.env.FRONTEND_URL}/dashboard/payments`;
+
+      const mailOptions = {
+        from: process.env.EMAIL_FROM,
+        to: email,
+        subject: `Payment Reminder: Outstanding Balance for ${courseTitle}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #d9534f;">Outstanding Payment Reminder</h2>
+            <p>Hello ${firstName},</p>
+            <p>This is a reminder that you have an outstanding balance for your course <strong>${courseTitle}</strong>.</p>
+            <div style="background: #fdf2f2; padding: 20px; border-left: 4px solid #d9534f; margin: 20px 0;">
+              <p><strong>Outstanding Balance:</strong> ${formattedBalance}</p>
+              <p><strong>Due Date:</strong> ${dueDateStr}</p>
+            </div>
+            <p>Please clear your balance to avoid any disruption to your access, as you have completed over 40% of the course duration.</p>
+            <p>If you have already made payment, please ignore this message or contact support.</p>
+            <br/>
+            <a href="${paymentLink}" style="background: #d9534f; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Make Payment</a>
+          </div>
+        `,
+      };
+
+      await transporter.sendMail(mailOptions);
+      logger.info(`Payment reminder email sent to ${email}`);
+    } catch (error) {
+      logger.error("Error sending payment reminder email:", error);
+    }
+  }
+  static async sendAssignmentCreatedEmail(
+    email: string,
+    studentName: string,
+    assignmentTitle: string,
+    courseTitle: string,
+    dueDate: Date
+  ): Promise<void> {
+    try {
+      const dueDateStr = new Date(dueDate).toLocaleDateString(undefined, {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+      const assignmentUrl = `${process.env.FRONTEND_URL}/dashboard/assignments`;
+
+      const mailOptions = {
+        from: process.env.EMAIL_FROM,
+        to: email,
+        subject: `New Assignment: ${assignmentTitle}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #007bff;">New Assignment Posted</h2>
+            <p>Hello ${studentName},</p>
+            <p>A new assignment <strong>${assignmentTitle}</strong> has been posted for your course <strong>${courseTitle}</strong>.</p>
+            <div style="background: #e9f5ff; padding: 20px; border-left: 4px solid #007bff; margin: 20px 0;">
+              <p><strong>Due Date:</strong> ${dueDateStr}</p>
+            </div>
+            <p>Please log in to the portal to view details and submit your work.</p>
+            <br/>
+            <a href="${assignmentUrl}" style="background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Assignment</a>
+          </div>
+        `,
+      };
+
+      await transporter.sendMail(mailOptions);
+      logger.info(`Assignment email sent to ${email}`);
+    } catch (error) {
+      logger.error("Error sending assignment email:", error);
+    }
+  }
+
+  static async sendAnnouncementEmail(
+    email: string,
+    name: string,
+    title: string,
+    content: string,
+    senderName: string
+  ): Promise<void> {
+    try {
+      const mailOptions = {
+        from: process.env.EMAIL_FROM,
+        to: email,
+        subject: `Announcement: ${title}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #333;">New Announcement</h2>
+            <p>Hello ${name},</p>
+            <p><strong>${senderName}</strong> posted a new announcement:</p>
+            <div style="background: #f9f9f9; padding: 20px; border: 1px solid #ddd; margin: 20px 0; border-radius: 5px;">
+              <h3 style="margin-top: 0;">${title}</h3>
+              <p style="white-space: pre-wrap;">${content}</p>
+            </div>
+            <p>Log in to the portal to view more details or reply if applicable.</p>
+          </div>
+        `,
+      };
+
+      await transporter.sendMail(mailOptions);
+      logger.info(`Announcement email sent to ${email}`);
+    } catch (error) {
+      logger.error("Error sending announcement email:", error);
+    }
+  }
 }

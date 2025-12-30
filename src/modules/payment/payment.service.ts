@@ -93,6 +93,7 @@ interface InitiatePaymentData {
   phoneNumber?: string;
   installmentPlan: InstallmentPlan;
   metadata?: Record<string, any>;
+  amount: number;
 }
 
 export class PaymentService {
@@ -165,34 +166,34 @@ export class PaymentService {
 
     // Check for duplicate request
     const existingPayment = await prisma.payment.findUnique({
-  where: { idempotencyKey },
-  include: {
-    student: {
+      where: { idempotencyKey },
       include: {
-        user: {
+        student: {
+          include: {
+            user: {
+              select: {
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
+            },
+          },
+        },
+        cohort: {
           select: {
-            firstName: true,
-            lastName: true,
-            email: true,
+            id: true,
+            name: true,
+            startDate: true,
+          },
+        },
+        course: {
+          select: {
+            id: true,
+            title: true,
           },
         },
       },
-    },
-    cohort: {
-      select: {
-        id: true,
-        name: true,
-        startDate: true,
-      },
-    },
-    course: {
-      select: {
-        id: true,
-        title: true,
-      },
-    },
-  },
-});
+    });
 
     if (existingPayment) {
       logger.info(`Duplicate payment request detected: ${idempotencyKey}`);
@@ -215,6 +216,8 @@ export class PaymentService {
       });
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 5000,
+      timeout: 10000,
     });
 
     if (!cohort) {
@@ -253,6 +256,30 @@ export class PaymentService {
 
     // Convert price to kobo
     const totalAmountKobo = MoneyUtils.toKobo(Number(cohort.course.price));
+    
+    // VALIDATE USER AMOUNT
+    if (!data.amount) {
+        throw new BadRequestError("Payment amount is required");
+    }
+
+    const userAmountKobo = MoneyUtils.toKobo(data.amount);
+
+    if (data.installmentPlan === "FULL_PAYMENT") {
+        if (userAmountKobo !== totalAmountKobo) {
+            throw new BadRequestError(`Full payment requires exactly ${MoneyUtils.formatNaira(totalAmountKobo)}`);
+        }
+    } else if (data.installmentPlan === "TWO_INSTALLMENTS") {
+        const minAmountKobo = Math.round(totalAmountKobo * (MINIMUM_FIRST_INSTALLMENT_PERCENT / 100));
+        
+        if (userAmountKobo < minAmountKobo) {
+            throw new BadRequestError(`Amount ${MoneyUtils.formatNaira(userAmountKobo)} is below the minimum required first installment of ${MoneyUtils.formatNaira(minAmountKobo)}`);
+        }
+        
+        if (userAmountKobo > totalAmountKobo) {
+             throw new BadRequestError(`Amount cannot exceed the total course price of ${MoneyUtils.formatNaira(totalAmountKobo)}`);
+        }
+    }
+
     const reference = this.generateReference();
 
     // Calculate installment amounts
@@ -261,19 +288,16 @@ export class PaymentService {
     let secondInstallmentDueDate: Date | undefined;
 
     if (data.installmentPlan === "TWO_INSTALLMENTS") {
-      const breakdown = this.calculateInstallments(totalAmountKobo);
-      firstInstallmentKobo = breakdown.firstInstallmentKobo;
-      secondInstallmentKobo = breakdown.secondInstallmentKobo;
+      firstInstallmentKobo = userAmountKobo;
+      secondInstallmentKobo = totalAmountKobo - firstInstallmentKobo;
       
-      // Second installment due in 30 days????
+      // Second installment due in 30 days
       secondInstallmentDueDate = new Date();
       secondInstallmentDueDate.setDate(secondInstallmentDueDate.getDate() + 30);
     }
 
-    // Amount to charge now
-    const amountToChargeKobo = data.installmentPlan === "FULL_PAYMENT" 
-      ? totalAmountKobo 
-      : firstInstallmentKobo;
+    // Amount to charge now is what user pays
+    const amountToChargeKobo = userAmountKobo;
 
     // Initialize Paystack transaction
     const paystackPayload = {
@@ -389,6 +413,8 @@ export class PaymentService {
       return newPayment;
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 5000,
+      timeout: 10000,
     });
 
     logger.info(`Payment initiated: ${reference} for student ${data.studentId}`);
@@ -464,38 +490,38 @@ export class PaymentService {
       if (paystackData.status !== "success") {
         // Payment failed
         const failedPayment = await tx.payment.update({
-  where: { id: payment.id },
-  data: {
-    status: "FAILED",
-    lastCheckedAt: new Date(),
-  },
-  include: {
-    student: {
-      include: {
-        user: {
-          select: {
-            firstName: true,
-            lastName: true,
-            email: true,
+          where: { id: payment.id },
+          data: {
+            status: "FAILED",
+            lastCheckedAt: new Date(),
           },
-        },
-      },
-    },
-    cohort: {
-      select: {
-        id: true,
-        name: true,
-        startDate: true,
-      },
-    },
-    course: {
-      select: {
-        id: true,
-        title: true,
-      },
-    },
-  },
-});
+          include: {
+            student: {
+              include: {
+                user: {
+                  select: {
+                    firstName: true,
+                    lastName: true,
+                    email: true,
+                  },
+                },
+              },
+            },
+            cohort: {
+              select: {
+                id: true,
+                name: true,
+                startDate: true,
+              },
+            },
+            course: {
+              select: {
+                id: true,
+                title: true,
+              },
+            },
+          },
+        });
 
         // Update transaction
         await tx.paymentTransaction.updateMany({
@@ -542,41 +568,46 @@ export class PaymentService {
         lastCheckedAt: new Date(),
       };
 
-      if (isFirstInstallment) {
+      // Verify amount for first installment security
+      if (isFirstInstallment && payment.firstInstallmentKobo && amountPaidKobo < payment.firstInstallmentKobo) {
+         // If underpaid, we record the payment but do NOT mark first installment as complete and do NOT enroll
+         // This prevents the security vulnerability where paying 1 kobo triggers enrollment
+         logger.warn(`Payment underpaid for first installment. Expected ${payment.firstInstallmentKobo}, got ${amountPaidKobo}`);
+      } else if (isFirstInstallment) {
         updateData.firstInstallmentPaidAt = new Date();
         updateData.firstInstallmentReference = payment.paystackReference;
       }
 
       const updatedPayment = await tx.payment.update({
-  where: { id: payment.id },
-  data: updateData,
-  include: {
-    student: {
-      include: {
-        user: {
-          select: {
-            firstName: true,
-            lastName: true,
-            email: true,
+        where: { id: payment.id },
+        data: updateData,
+        include: {
+          student: {
+            include: {
+              user: {
+                select: {
+                  firstName: true,
+                  lastName: true,
+                  email: true,
+                },
+              },
+            },
+          },
+          cohort: {
+            select: {
+              id: true,
+              name: true,
+              startDate: true,
+            },
+          },
+          course: {
+            select: {
+              id: true,
+              title: true,
+            },
           },
         },
-      },
-    },
-    cohort: {
-      select: {
-        id: true,
-        name: true,
-        startDate: true,
-      },
-    },
-    course: {
-      select: {
-        id: true,
-        title: true,
-      },
-    },
-  },
-});
+      });
 
       // Update transaction record
       await tx.paymentTransaction.updateMany({
@@ -594,16 +625,28 @@ export class PaymentService {
         },
       });
 
-      // If fully paid, enroll student
-      if (isFullyPaid) {
-        await tx.enrollment.create({
-          data: {
+      // Check if already enrolled to prevent crash
+      const existingEnrollment = await tx.enrollment.findUnique({
+        where: {
+          studentId_cohortId: {
             studentId: payment.studentId,
-            courseId: payment.courseId,
             cohortId: payment.cohortId,
-            status: "ACTIVE",
           },
-        });
+        },
+      });
+
+      // If fully paid, enroll student if not already enrolled
+      if (isFullyPaid) {
+        if (!existingEnrollment) {
+          await tx.enrollment.create({
+            data: {
+              studentId: payment.studentId,
+              courseId: payment.courseId,
+              cohortId: payment.cohortId,
+              status: "ACTIVE",
+            },
+          });
+        }
 
         await this.createAuditLog(
           payment.id,
@@ -618,23 +661,38 @@ export class PaymentService {
           tx
         );
 
-        logger.info(`Payment completed and student enrolled: ${payment.reference}`);
+        logger.info(`Payment completed: ${payment.reference}`);
       } else {
+
+        // If first installment compliant, enroll
+        const isFirstInstallmentCompliant = isFirstInstallment && (!payment.firstInstallmentKobo || amountPaidKobo >= payment.firstInstallmentKobo);
+
+        if (isFirstInstallmentCompliant && !existingEnrollment) {
+           await tx.enrollment.create({
+            data: {
+              studentId: payment.studentId,
+              courseId: payment.courseId,
+              cohortId: payment.cohortId,
+              status: "ACTIVE",
+            },
+          });
+          logger.info(`First installment paid and student enrolled: ${payment.reference}`);
+        }
+
         await this.createAuditLog(
           payment.id,
-          "FIRST_INSTALLMENT_PAID",
-          `First installment paid. Balance: ${MoneyUtils.formatNaira(newBalance)}`,
+          "INSTALLMENT_PAID",
+          `Installment paid. Balance: ${MoneyUtils.formatNaira(newBalance)}`,
           undefined,
           "WEBHOOK",
           {
             amount_paid: MoneyUtils.formatNaira(amountPaidKobo),
             balance: MoneyUtils.formatNaira(newBalance),
             due_date: payment.secondInstallmentDueDate,
+            enrolled: isFirstInstallmentCompliant && !existingEnrollment
           },
           tx
         );
-
-        logger.info(`First installment paid: ${payment.reference}. Balance: ${MoneyUtils.formatNaira(newBalance)}`);
       }
 
       return updatedPayment;

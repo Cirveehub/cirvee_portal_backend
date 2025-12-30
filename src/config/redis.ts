@@ -1,4 +1,4 @@
-import Redis from "ioredis";
+import Redis, { RedisOptions } from "ioredis";
 import logger from "../utils/logger";
 
 // const redis = new Redis({
@@ -17,7 +17,14 @@ if (!redisUrl) {
   throw new Error("REDIS_URL is not defined");
 }
 
-const redis = new Redis(redisUrl);
+export const REDIS_URL = redisUrl;
+
+export const redisConfig: RedisOptions = {
+  maxRetriesPerRequest: null,
+  enableReadyCheck: false,
+};
+
+const redis = new Redis(redisUrl, redisConfig);
 
 redis.on("connect", () => {
   logger.info("Redis connected ");

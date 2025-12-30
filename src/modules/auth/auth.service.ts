@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import prisma from "@config/database";
 import { IdGenerator } from "../../utils/idGenerator";
-import { EmailUtil } from "../../utils/email";
+import { QueueService } from "../../services/queue.service";
 import { OtpUtil } from "../../utils/otp";
 import { TokenUtil } from "../../utils/token";
 import { UserRole } from "@prisma/client";
@@ -55,7 +55,10 @@ export class AuthService {
     // Generate and send OTP
     const otp = OtpUtil.generate();
     await OtpUtil.save(data.email, otp);
-    await EmailUtil.sendVerificationEmail(data.email, data.firstName, otp);
+    await QueueService.addEmailJob({
+      type: "VERIFICATION",
+      payload: { email: data.email, name: data.firstName, otp }
+    });
 
     logger.info(`Student signup: ${studentId} - ${data.email}`);
 
@@ -89,11 +92,10 @@ export class AuthService {
     });
 
     if (user.student) {
-      await EmailUtil.sendWelcomeEmail(
-        email,
-        user.firstName,
-        user.student.studentId
-      );
+      await QueueService.addEmailJob({
+        type: "WELCOME",
+        payload: { email, name: user.firstName, studentId: user.student.studentId }
+      });
     }
 
     const accessToken = TokenUtil.generateAccessToken({
@@ -416,7 +418,10 @@ export class AuthService {
     const resetToken = TokenUtil.generatePasswordResetToken();
     await TokenUtil.savePasswordResetToken(email, resetToken);
 
-    await EmailUtil.sendPasswordResetEmail(email, user.firstName, resetToken);
+    await QueueService.addEmailJob({
+      type: "PASSWORD_RESET",
+      payload: { email, name: user.firstName, resetToken }
+    });
 
     logger.info(`Password reset requested: ${email}`);
 
@@ -476,7 +481,10 @@ export class AuthService {
 
     const otp = OtpUtil.generate();
     await OtpUtil.save(email, otp);
-    await EmailUtil.sendVerificationEmail(email, user.firstName, otp);
+    await QueueService.addEmailJob({
+      type: "VERIFICATION",
+      payload: { email, name: user.firstName, otp }
+    });
 
     logger.info(`OTP resent: ${email}`);
 

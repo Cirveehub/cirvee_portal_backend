@@ -10,7 +10,6 @@ module.exports = {
     '^@modules/(.*)$': '<rootDir>/src/modules/$1',
     '^@utils/(.*)$': '<rootDir>/src/utils/$1',
     '^@types/(.*)$': '<rootDir>/src/types/$1',
-    '^@prisma/client$': '<rootDir>/src/generated/prisma',
   },
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {

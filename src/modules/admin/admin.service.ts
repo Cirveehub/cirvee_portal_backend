@@ -4,7 +4,7 @@ import prisma from "@config/database";
 import { IdGenerator } from "../../utils/idGenerator";
 import { UserRole } from "@prisma/client";
 import logger from "../../utils/logger";
-import { EmailUtil } from "@utils/email";
+import { QueueService } from "../../services/queue.service";
 
 export class AdminService {
   private static generateRandomPassword(): string {
@@ -58,13 +58,16 @@ export class AdminService {
       return { user, admin };
     });
 
-    await EmailUtil.sendStaffCredentialsEmail(
-      data.email,
-      data.firstName,
-      staffId,
-      temporaryPassword,
-      "Administrator"
-    );
+    await QueueService.addEmailJob({
+      type: "STAFF_CREDENTIALS",
+      payload: {
+        email: data.email,
+        name: data.firstName,
+        staffId,
+        password: temporaryPassword,
+        role: "Administrator"
+      }
+    });
 
     logger.info(`Admin created and credentials sent: ${staffId}`);
 
@@ -125,13 +128,16 @@ export class AdminService {
     });
 
     // Send Email
-    await EmailUtil.sendStaffCredentialsEmail(
-      data.email,
-      data.firstName,
-      staffId,
-      temporaryPassword,
-      "Tutor"
-    );
+    await QueueService.addEmailJob({
+      type: "STAFF_CREDENTIALS",
+      payload: {
+        email: data.email,
+        name: data.firstName,
+        staffId,
+        password: temporaryPassword,
+        role: "Tutor"
+      }
+    });
 
     logger.info(`Tutor created and credentials sent: ${staffId}`);
 

@@ -5,6 +5,8 @@ import app from "./app";
 import { connectDatabase, disconnectDatabase } from "@config/database";
 import redis, { testRedis } from "./config/redis";
 import logger from "./utils/logger";
+import { PaymentScheduler } from "./modules/payment/payment.scheduler";
+import "./workers/email.worker"; // Start email worker
 
 const PORT = process.env.PORT || 5000;
 
@@ -13,6 +15,9 @@ const startServer = async () => {
     // Test Database Connection
     logger.info(" Testing database connection...");
     await connectDatabase();
+
+    // Initialize Cron Jobs
+    PaymentScheduler.init();
 
     // Test Redis Connection
     logger.info("Testing Redis connection...");
