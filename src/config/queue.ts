@@ -11,10 +11,10 @@ export const DEFAULT_JOB_OPTIONS: JobsOptions = {
     delay: 1000,
   },
   removeOnComplete: {
-    age: 24 * 3600, // keep up to 24 hours
-    count: 1000, // keep up to 1000 jobs
+    age: 24 * 3600,
+    count: 1000,
   },
   removeOnFail: {
-    age: 24 * 3600 * 7, // keep up to 7 days
+    age: 24 * 3600 * 7,
   },
 };

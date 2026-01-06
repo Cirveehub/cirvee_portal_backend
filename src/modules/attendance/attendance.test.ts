@@ -11,11 +11,24 @@ jest.mock("../../config/redis", () => ({
   testRedis: jest.fn().mockResolvedValue(true),
 }));
 
+jest.mock("bullmq", () => ({
+  Queue: jest.fn().mockImplementation(() => ({
+    add: jest.fn(),
+    close: jest.fn(),
+    on: jest.fn(),
+  })),
+  Worker: jest.fn().mockImplementation(() => ({
+    close: jest.fn(),
+    on: jest.fn(),
+  })),
+}));
+
 import request from "supertest";
 import app from "../../app";
 import prisma from "@config/database";
 import { TokenUtil } from "../../utils/token";
 import { UserRole, AttendanceLogType, CohortStatus } from "@prisma/client";
+import { TestFactory } from "../../utils/factories";
 
 describe("Attendance Module (QR System)", () => {
   let adminToken: string;
@@ -30,92 +43,69 @@ describe("Attendance Module (QR System)", () => {
   let timetableId: string;
 
   beforeAll(async () => {
-    const timestamp = Date.now();
-    const adminUser = await prisma.user.create({
-      data: {
-        email: `admin-attendance-${timestamp}@test.com`,
-        password: "password",
-        firstName: "Admin",
-        lastName: "Attendance",
-        role: UserRole.ADMIN,
-        admin: { create: { staffId: `SA-${timestamp}`, permissions: ["*"] } },
-        tutor: { create: { staffId: `ST-${timestamp}`, expertise: ["Testing"], bio: "Test Bio" } }
-      },
-      include: { admin: true, tutor: true }
-    }) as any;
-    adminId = adminUser.admin!.id;
-    tutorId = adminUser.tutor!.id;
-    adminToken = TokenUtil.generateAccessToken({ id: adminUser.id, email: adminUser.email, role: adminUser.role });
+    await TestFactory.clearDatabase();
+    
+    // 1. Create Dual Role User (Admin + Tutor)
+    // specific to this test which seems to require one user acting as both? 
+    // Or maybe just convenience. Let's use Factory for Admin and append Tutor.
+    const adminUser = await TestFactory.createAdmin(undefined, {
+      role: UserRole.ADMIN, // prioritizing admin role on user
+      admin: { permissions: ["*"] }
+    });
 
-    const course = await prisma.course.create({
+    // Manually add Tutor profile to this admin user effectively making them dual role capable if logic permits
+    // The test expects adminUser.tutor to exist.
+    const tutorProfile = await prisma.tutor.create({
       data: {
-        title: "Test Attendance Course",
-        description: "Test",
-        price: 100,
-        duration: 4,
-        createdById: adminId,
-        syllabus: ["Week 1: Intro"]
+        userId: adminUser.id,
+        staffId: `ST-${Date.now()}`,
+        expertise: ["Testing"],
+        bio: "Test Bio"
       }
+    });
+
+    // Re-fetch to get embedded structure like test expects if needed, 
+    // but we can just assign IDs since that's what is extracted.
+    adminId = adminUser.admin!.id;
+    tutorId = tutorProfile.id;
+    adminToken = TokenUtil.generateAccessToken({ id: adminUser.id, email: adminUser.email, role: adminUser.role }); 
+
+    // 2. Create Course
+    const course = await TestFactory.createCourse(adminId, {
+      title: "Test Attendance Course",
+      price: 100
     });
     courseId = course.id;
 
-    const studentUser = await prisma.user.create({
-      data: {
-        email: `student-attendance-${timestamp}@test.com`,
-        password: "password",
-        firstName: "Student",
-        lastName: "Attendance",
-        role: UserRole.STUDENT,
-        student: { create: { studentId: `ST-ATT-${timestamp}` } }
-      },
-      include: { student: true }
-    }) as any;
+    // 3. Create Student
+    const studentUser = await TestFactory.createStudent();
     studentId = studentUser.student!.id;
-    studentToken = TokenUtil.generateAccessToken({ id: studentUser.id, email: studentUser.email, role: studentUser.role });
+    studentToken = TokenUtil.generateAccessToken({ id: studentUser.id, email: studentUser.email, role: UserRole.STUDENT });
 
-    const cohort = await prisma.cohort.create({
-      data: {
-        name: "Test Cohort A",
-        courseId: courseId,
-        tutorId: tutorId,
-        createdById: adminId,
-        status: CohortStatus.ONGOING,
-        startDate: new Date(),
-        endDate: new Date(Date.now() + 86400000 * 30),
-      }
+    // 4. Create Cohort
+    const cohort = await TestFactory.createCohort(course.id, tutorId, adminId, {
+      name: "Test Cohort A",
+      status: CohortStatus.ONGOING,
+      startDate: new Date(),
+      endDate: new Date(Date.now() + 86400000 * 30),
     });
     cohortId = cohort.id;
 
-    await prisma.enrollment.create({
-      data: {
-        studentId: studentId,
-        courseId: courseId,
-        cohortId: cohortId
-      }
-    });
+    // 5. Enroll Student
+    await TestFactory.createEnrollment(studentId, course.id, cohortId);
 
+    // 6. Create Timetable
     const currentDay = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-    const timetable = await prisma.timetable.create({
-      data: {
-        cohortId: cohortId,
-        dayOfWeek: currentDay,
-        startTime: "00:00", // Wide window for testing
-        endTime: "23:59"
-      }
+    const timetable = await TestFactory.createTimetable(cohortId, {
+      dayOfWeek: currentDay,
+      startTime: "00:00",
+      endTime: "23:59"
     });
     timetableId = timetable.id;
   });
 
   afterAll(async () => {
-    await prisma.attendanceLog.deleteMany();
-    await prisma.attendanceQRCode.deleteMany();
-    await prisma.timetable.deleteMany();
-    await prisma.enrollment.deleteMany();
-    await prisma.cohort.deleteMany();
-    await prisma.course.deleteMany();
-    await prisma.admin.deleteMany();
-    await prisma.student.deleteMany();
-    await prisma.user.deleteMany({ where: { role: { in: [UserRole.ADMIN, UserRole.STUDENT] } } });
+    await TestFactory.clearDatabase();
   });
 
   describe("QR Code Generation", () => {

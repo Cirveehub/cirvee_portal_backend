@@ -5,8 +5,7 @@ import logger from '../utils/logger';
 import { EmailUtil } from '../utils/email';
 import Redis from 'ioredis';
 
-// Create a new connection for the worker (blocking)
-// We need to use the full connection details.
+
 const connection = new Redis(REDIS_URL, {
   ...redisConfig,
   maxRetriesPerRequest: null

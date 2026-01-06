@@ -26,6 +26,7 @@ import attendanceRoutes from "./modules/attendance/attendance.routes";
 import communityRoutes from "./modules/community/community.routes";
 import announcementRoutes from "./modules/announcement/announcement.routes";
 import paymentRoutes from "./modules/payment/payment.routes";
+import statsRoutes from "./modules/stats/stats.routes";
 
 dotenv.config();
 
@@ -225,9 +226,14 @@ app.get("/api/v1/test-system", async (req: Request, res: Response) => {
 });
 
 //API Routes
+// ... existing imports
+
+
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/admin", adminRoutes);
+app.use("/api/v1/stats", statsRoutes); // Register stats routes
 app.use("/api/v1/courses", courseRoutes);
+
 app.use("/api/v1/cohorts", cohortRoutes);
 app.use("/api/v1/academic", academicRoutes);
 app.use("/api/v1/attendance", attendanceRoutes);

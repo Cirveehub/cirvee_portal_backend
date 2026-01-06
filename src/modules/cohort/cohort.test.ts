@@ -12,11 +12,24 @@ jest.mock("../../config/redis", () => ({
   testRedis: jest.fn().mockResolvedValue(true),
 }));
 
+jest.mock("bullmq", () => ({
+  Queue: jest.fn().mockImplementation(() => ({
+    add: jest.fn(),
+    close: jest.fn(),
+    on: jest.fn(),
+  })),
+  Worker: jest.fn().mockImplementation(() => ({
+    close: jest.fn(),
+    on: jest.fn(),
+  })),
+}));
+
 import request from "supertest";
 import app from "../../app";
 import prisma from "@config/database";
 import { TokenUtil } from "../../utils/token";
 import { UserRole } from "@prisma/client";
+import { TestFactory } from "../../utils/factories";
 
 describe("Cohort Module Endpoints", () => {
   let adminToken: string;
@@ -33,38 +46,24 @@ describe("Cohort Module Endpoints", () => {
   let testTimetableId: string;
 
   beforeAll(async () => {
+    await TestFactory.clearDatabase();
+
     // 1. Create a test department
-    const dept = await prisma.department.create({
-      data: {
-        name: `Test-Dept-Cohort-${Date.now()}`,
-        description: "Test department for cohort tests",
-      },
+    const dept = await TestFactory.createDepartment({
+      name: `Test-Dept-Cohort-${Date.now()}`,
+      description: "Test department for cohort tests",
     });
     testDeptId = dept.id;
 
     // 2. Create an Admin User
-    const adminEmail = `admin-cohort-${Date.now()}@test.com`;
-    const adminUser = await prisma.user.create({
-      data: {
-        email: adminEmail,
-        password: "password123",
-        firstName: "Admin",
-        lastName: "Cohort",
-        role: UserRole.ADMIN,
-        isActive: true,
-        isEmailVerified: true,
+    const adminUser = await TestFactory.createAdmin(testDeptId, {
+        email: `admin-cohort-${Date.now()}@test.com`,
         admin: {
-          create: {
             staffId: `STAFF-ADMIN-${Date.now()}`,
-            departmentId: testDeptId,
             permissions: ["CREATE_COHORT", "ASSIGN_TUTOR"],
-          }
         }
-      },
-      include: {
-        admin: true
-      }
     });
+
     adminUserId = adminUser.id;
     adminId = adminUser.admin!.id;
     adminToken = TokenUtil.generateAccessToken({
@@ -74,28 +73,14 @@ describe("Cohort Module Endpoints", () => {
     });
 
     // 3. Create a Tutor User
-    const tutorEmail = `tutor-cohort-${Date.now()}@test.com`;
-    const tutorUser = await prisma.user.create({
-      data: {
-        email: tutorEmail,
-        password: "password123",
-        firstName: "Tutor",
-        lastName: "Cohort",
-        role: UserRole.TUTOR,
-        isActive: true,
-        isEmailVerified: true,
+    const tutorUser = await TestFactory.createTutor({
+        email: `tutor-cohort-${Date.now()}@test.com`,
         tutor: {
-          create: {
             staffId: `STAFF-TUTOR-${Date.now()}`,
-            departmentId: testDeptId,
             expertise: ["Testing"],
-          }
         }
-      },
-      include: {
-        tutor: true
-      }
     });
+
     tutorUserId = tutorUser.id;
     tutorId = tutorUser.tutor!.id;
     tutorToken = TokenUtil.generateAccessToken({
@@ -105,17 +90,8 @@ describe("Cohort Module Endpoints", () => {
     });
 
     // 4. Create a Student User
-    const studentEmail = `student-cohort-${Date.now()}@test.com`;
-    const studentUser = await prisma.user.create({
-      data: {
-        email: studentEmail,
-        password: "password123",
-        firstName: "Student",
-        lastName: "Cohort",
-        role: UserRole.STUDENT,
-        isActive: true,
-        isEmailVerified: true,
-      },
+    const studentUser = await TestFactory.createStudent({
+        email: `student-cohort-${Date.now()}@test.com`,
     });
     studentUserId = studentUser.id;
     studentToken = TokenUtil.generateAccessToken({
@@ -125,48 +101,27 @@ describe("Cohort Module Endpoints", () => {
     });
 
     // 5. Create a Course (required for cohort)
-    const course = await prisma.course.create({
-      data: {
+    const course = await TestFactory.createCourse(adminUserId, {
         title: "Cohort dependency course",
         description: "Required for cohort",
         syllabus: ["Topic 1"],
         price: 50,
         duration: 2,
-        createdById: adminId,
-      }
     });
     testCourseId = course.id;
 
     // 6. Create a Cohort for shared use
-    const cohort = await prisma.cohort.create({
-      data: {
-        courseId: testCourseId,
-        tutorId: tutorId,
+    const cohort = await TestFactory.createCohort(testCourseId, tutorId, adminUserId, {
         name: "Initial Test Cohort",
         startDate: new Date(Date.now() + 86400000),
         endDate: new Date(Date.now() + 86400000 * 30),
         status: "UPCOMING",
-        createdById: adminId,
-      }
     });
     testCohortId = cohort.id;
   });
 
   afterAll(async () => {
-    // Cleanup
-    await prisma.cohort.deleteMany({
-      where: { courseId: testCourseId }
-    });
-    await prisma.course.deleteMany({
-        where: { id: testCourseId }
-    });
-    await prisma.user.deleteMany({
-      where: { id: { in: [adminUserId, tutorUserId, studentUserId] } }
-    });
-    await prisma.department.deleteMany({
-      where: { id: testDeptId }
-    });
-    await prisma.$disconnect();
+    await TestFactory.clearDatabase();
   });
 
   describe("POST /api/v1/cohorts", () => {
@@ -222,21 +177,13 @@ describe("Cohort Module Endpoints", () => {
   describe("PATCH /api/v1/cohorts/:id/assign-tutor", () => {
     it("should allow admin to reassign tutor", async () => {
       // Create another tutor to reassign to
-      const tutor2User = await prisma.user.create({
-        data: {
+      const tutor2User = await TestFactory.createTutor({
           email: `tutor2-${Date.now()}@test.com`,
-          password: "password123",
           firstName: "Tutor2",
           lastName: "Reassign",
-          role: UserRole.TUTOR,
           tutor: {
-            create: {
               staffId: `STAFF-TUTOR2-${Date.now()}`,
-              departmentId: testDeptId,
-            }
           }
-        },
-        include: { tutor: true }
       });
 
       const res = await request(app)
@@ -337,13 +284,11 @@ describe("Cohort Module Endpoints", () => {
 
     it("should detect time conflicts", async () => {
       // Create first timetable entry
-      await prisma.timetable.create({
-        data: {
-          cohortId: testCohortId,
+      // Create first timetable entry
+      await TestFactory.createTimetable(testCohortId, {
           dayOfWeek: "Tuesday",
           startTime: "14:00",
           endTime: "16:00",
-        }
       });
 
       // Try to create overlapping entry
@@ -404,13 +349,11 @@ describe("Cohort Module Endpoints", () => {
 
     it("should validate updated times don't create conflicts", async () => {
       // Create another entry on Monday
-      const anotherEntry = await prisma.timetable.create({
-        data: {
-          cohortId: testCohortId,
+      // Create another entry on Monday
+      const anotherEntry = await TestFactory.createTimetable(testCohortId, {
           dayOfWeek: "Monday",
           startTime: "14:00",
           endTime: "16:00",
-        }
       });
 
       // Try to update testTimetableId to overlap
@@ -442,13 +385,10 @@ describe("Cohort Module Endpoints", () => {
       ];
 
       for (const slot of schedule) {
-        await prisma.timetable.create({
-          data: {
-            cohortId: testCohortId,
+        await TestFactory.createTimetable(testCohortId, {
             dayOfWeek: slot.day,
             startTime: slot.start,
             endTime: slot.end,
-          }
         });
       }
     });
@@ -531,13 +471,11 @@ describe("Cohort Module Endpoints", () => {
   describe("DELETE /api/v1/cohorts/timetables/:id", () => {
     it("should allow admin to delete timetable entry", async () => {
       // Create a timetable to delete
-      const timetableToDelete = await prisma.timetable.create({
-        data: {
-          cohortId: testCohortId,
+      // Create a timetable to delete
+      const timetableToDelete = await TestFactory.createTimetable(testCohortId, {
           dayOfWeek: "Saturday",
           startTime: "10:00",
           endTime: "12:00",
-        }
       });
 
       const res = await request(app)

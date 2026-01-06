@@ -1,6 +1,7 @@
 
 
 // Mock Redis before importing app
+// Mock Redis and BullMQ before importing app
 jest.mock("../../config/redis", () => ({
   __esModule: true,
   default: {
@@ -14,6 +15,18 @@ jest.mock("../../config/redis", () => ({
   testRedis: jest.fn().mockResolvedValue(true),
 }));
 
+jest.mock("bullmq", () => ({
+  Queue: jest.fn().mockImplementation(() => ({
+    add: jest.fn(),
+    close: jest.fn(),
+    on: jest.fn(),
+  })),
+  Worker: jest.fn().mockImplementation(() => ({
+    close: jest.fn(),
+    on: jest.fn(),
+  })),
+}));
+
 import request from "supertest";
 import app from "../../app";
 import prisma from "@config/database";
@@ -21,6 +34,7 @@ import { TokenUtil } from "../../utils/token";
 
 import { UserRole } from "@prisma/client";
 import { IdGenerator } from "../../utils/idGenerator";
+import { TestFactory } from "../../utils/factories";
 
 describe("Super Admin Endpoints", () => {
   let superAdminToken: string;
@@ -30,27 +44,18 @@ describe("Super Admin Endpoints", () => {
   let testDepartmentId: string;
 
   beforeAll(async () => {
-    //Create a test department 
-    const testDept = await prisma.department.create({
-      data: {
-        name: `Test-Dept-${Date.now()}`,
-        description: "Test department for admin tests",
-      },
+    // Create a test department 
+    const testDept = await TestFactory.createDepartment({
+      name: `Test-Dept-${Date.now()}`
     });
     testDepartmentId = testDept.id;
 
-    //  Create a Super Admin User
-    const superAdminEmail = `superadmin-${Date.now()}@test.com`;
-    const superAdmin = await prisma.user.create({
-      data: {
-        email: superAdminEmail,
-        password: "password123", 
-        firstName: "Super",
-        lastName: "Admin",
-        role: "SUPER_ADMIN" as UserRole, 
-        isActive: true,
-        isEmailVerified: true,
-      },
+    // Create a Super Admin User
+    const superAdmin = await TestFactory.createAdmin(testDepartmentId, {
+      role: UserRole.SUPER_ADMIN,
+      firstName: "Super",
+      lastName: "Admin",
+      admin: { permissions: ["SUPER_ADMIN"], staffId: `SA-${Date.now()}` }
     });
     superAdminId = superAdmin.id;
     superAdminToken = TokenUtil.generateAccessToken({
@@ -59,18 +64,12 @@ describe("Super Admin Endpoints", () => {
         role: superAdmin.role
     });
 
-    // Create a  Admin User 
-    const adminEmail = `admin-${Date.now()}@test.com`;
-    const adminUser = await prisma.user.create({
-      data: {
-        email: adminEmail,
-        password: "password123",
-        firstName: "Regular",
-        lastName: "Admin",
-        role: UserRole.ADMIN,
-        isActive: true,
-        isEmailVerified: true,
-      },
+    // Create a Admin User 
+    const adminUser = await TestFactory.createAdmin(testDepartmentId, {
+      role: UserRole.ADMIN,
+      firstName: "Regular",
+      lastName: "Admin",
+      admin: { permissions: ["READ_ONLY"], staffId: `ADM-${Date.now()}` }
     });
     adminId = adminUser.id;
     adminToken = TokenUtil.generateAccessToken({
@@ -81,37 +80,7 @@ describe("Super Admin Endpoints", () => {
   });
 
   afterAll(async () => {
-    await prisma.user.deleteMany({
-      where: {
-        id: {
-          in: [superAdminId, adminId]
-        }
-      }
-    });
-    await prisma.admin.deleteMany({
-        where: {
-            user: {
-                email: {
-                    contains: "@test.com"
-                }
-            }
-        }
-    });
-     await prisma.tutor.deleteMany({
-        where: {
-            user: {
-                email: {
-                    contains: "@test.com"
-                }
-            }
-        }
-    });
-    await prisma.department.deleteMany({
-        where: {
-            id: testDepartmentId
-        }
-    });
-    await prisma.$disconnect();
+    await TestFactory.clearDatabase();
   });
 
   describe("POST /api/v1/admin/create-admin", () => {

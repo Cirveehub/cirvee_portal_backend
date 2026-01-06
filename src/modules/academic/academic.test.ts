@@ -12,6 +12,18 @@ jest.mock("../../config/redis", () => ({
   testRedis: jest.fn().mockResolvedValue(true),
 }));
 
+jest.mock("bullmq", () => ({
+  Queue: jest.fn().mockImplementation(() => ({
+    add: jest.fn(),
+    close: jest.fn(),
+    on: jest.fn(),
+  })),
+  Worker: jest.fn().mockImplementation(() => ({
+    close: jest.fn(),
+    on: jest.fn(),
+  })),
+}));
+
 jest.mock("../../utils/cloudinary", () => ({
   uploadToCloudinary: jest.fn().mockResolvedValue({
     secure_url: "https://cloudinary.com/test-file.pdf",
@@ -25,6 +37,7 @@ import app from "../../app";
 import prisma from "@config/database";
 import { TokenUtil } from "../../utils/token";
 import { UserRole } from "@prisma/client";
+import { TestFactory } from "../../utils/factories";
 import path from "path";
 
 describe("Academic Module (Materials & Assignments)", () => {
@@ -41,87 +54,55 @@ describe("Academic Module (Materials & Assignments)", () => {
   let testAssignmentId: string;
 
   beforeAll(async () => {
-    const dept = await prisma.department.create({
-      data: { name: `Acad-Dept-${Date.now()}` }
+    await TestFactory.clearDatabase();
+
+    const dept = await TestFactory.createDepartment({
+      name: `Acad-Dept-${Date.now()}`
     });
     testDeptId = dept.id;
 
-    const admin = await prisma.user.create({
-      data: {
+    const admin = await TestFactory.createAdmin(testDeptId, {
         email: `admin-acad-${Date.now()}@test.com`,
-        password: "password",
-        firstName: "Admin",
-        lastName: "Test",
-        role: UserRole.ADMIN,
-        admin: { create: { staffId: `S-${Date.now()}`, departmentId: testDeptId, permissions: ["*"] } }
-      },
-      include: { admin: true }
+        admin: {
+            staffId: `S-${Date.now()}`,
+            permissions: ["*"]
+        }
     });
+
     adminId = admin.admin!.id;
     adminToken = TokenUtil.generateAccessToken({ id: admin.id, email: admin.email, role: admin.role });
 
-    const tutor = await prisma.user.create({
-      data: {
+    const tutor = await TestFactory.createTutor({
         email: `tutor-acad-${Date.now()}@test.com`,
-        password: "password",
-        firstName: "Tutor",
-        lastName: "Test",
-        role: UserRole.TUTOR,
-        tutor: { create: { staffId: `T-${Date.now()}`, departmentId: testDeptId } }
-      },
-      include: { tutor: true }
+        tutor: { staffId: `T-${Date.now()}` }
     });
     tutorId = tutor.tutor!.id;
     tutorToken = TokenUtil.generateAccessToken({ id: tutor.id, email: tutor.email, role: tutor.role });
 
-    const student = await prisma.user.create({
-      data: {
+    const student = await TestFactory.createStudent({
         email: `student-acad-${Date.now()}@test.com`,
-        password: "password",
-        firstName: "Student",
-        lastName: "Test",
-        role: UserRole.STUDENT,
-        student: { create: { studentId: `ST-${Date.now()}` } }
-      },
-      include: { student: true }
+        student: { studentId: `ST-${Date.now()}` }
     });
     studentId = student.student!.id;
     studentToken = TokenUtil.generateAccessToken({ id: student.id, email: student.email, role: student.role });
 
-    const course = await prisma.course.create({
-      data: {
+    const course = await TestFactory.createCourse(adminId, {
         title: "Test Acad Course",
-        description: "Desc",
-        syllabus: ["Topic"],
         price: 10,
         duration: 1,
-        createdById: adminId
-      }
     });
     testCourseId = course.id;
 
-    const cohort = await prisma.cohort.create({
-      data: {
-        courseId: testCourseId,
-        tutorId: tutorId,
+    const cohort = await TestFactory.createCohort(testCourseId, tutorId, adminId, {
         name: "Test Acad Cohort",
         startDate: new Date(),
         endDate: new Date(Date.now() + 86400000),
-        createdById: adminId
-      }
     });
     testCohortId = cohort.id;
   });
 
   afterAll(async () => {
-    await prisma.assignmentSubmission.deleteMany({});
-    await prisma.assignment.deleteMany({});
-    await prisma.material.deleteMany({});
-    await prisma.cohort.deleteMany({});
-    await prisma.course.deleteMany({});
-    await prisma.user.deleteMany({ where: { role: { in: [UserRole.ADMIN, UserRole.TUTOR, UserRole.STUDENT] } } });
-    await prisma.department.deleteMany({ where: { id: testDeptId } });
-    await prisma.$disconnect();
+    await TestFactory.clearDatabase();
   });
 
   describe("Materials", () => {

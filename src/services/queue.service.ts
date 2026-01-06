@@ -12,15 +12,12 @@ const emailQueue = new Queue(QUEUES.EMAIL, {
 });
 
 export class QueueService {
-  /**
-   * Add an email job to the queue
-   * @param data Email data
-   */
+  //Add an email job to the queue
   static async addEmailJob(data: { 
     type: 'VERIFICATION' | 'PASSWORD_RESET' | 'WELCOME' | 'STAFF_CREDENTIALS' | 'PAYMENT_REMINDER' | 'ASSIGNMENT_CREATED' | 'ANNOUNCEMENT_NEW';
     payload: any 
   }) {
-    // Pass the full data object so worker can destructure { type, payload }
+    // { type, payload }
     return emailQueue.add(data.type, data);
   }
 

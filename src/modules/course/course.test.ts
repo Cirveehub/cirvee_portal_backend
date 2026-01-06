@@ -13,11 +13,24 @@ jest.mock("../../config/redis", () => ({
   testRedis: jest.fn().mockResolvedValue(true),
 }));
 
+jest.mock("bullmq", () => ({
+  Queue: jest.fn().mockImplementation(() => ({
+    add: jest.fn(),
+    close: jest.fn(),
+    on: jest.fn(),
+  })),
+  Worker: jest.fn().mockImplementation(() => ({
+    close: jest.fn(),
+    on: jest.fn(),
+  })),
+}));
+
 import request from "supertest";
 import app from "../../app";
 import prisma from "@config/database";
 import { TokenUtil } from "../../utils/token";
 import { CohortStatus, UserRole } from "@prisma/client";
+import { TestFactory } from "../../utils/factories";
 
 describe("Course Module Endpoints", () => {
   let adminToken: string;
@@ -30,38 +43,24 @@ describe("Course Module Endpoints", () => {
   let testTutorId: string;
 
   beforeAll(async () => {
+    await TestFactory.clearDatabase();
+
     // 1. Create a test department
-    const dept = await prisma.department.create({
-      data: {
-        name: `Test-Dept-Course-${Date.now()}`,
-        description: "Test department for course tests",
-      },
+    const dept = await TestFactory.createDepartment({
+      name: `Test-Dept-Course-${Date.now()}`,
+      description: "Test department for course tests",
     });
     testDeptId = dept.id;
 
     // 2. Create an Admin User
-    const adminEmail = `admin-course-${Date.now()}@test.com`;
-    const adminUser = await prisma.user.create({
-      data: {
-        email: adminEmail,
-        password: "password123",
-        firstName: "Admin",
-        lastName: "Course",
-        role: UserRole.ADMIN,
-        isActive: true,
-        isEmailVerified: true,
+    const adminUser = await TestFactory.createAdmin(testDeptId, {
+        email: `admin-course-${Date.now()}@test.com`,
         admin: {
-          create: {
             staffId: `STAFF-${Date.now()}`,
-            departmentId: testDeptId,
             permissions: ["CREATE_COURSE", "UPDATE_COURSE", "DELETE_COURSE"],
-          }
         }
-      },
-      include: {
-        admin: true
-      }
     });
+
     adminUserId = adminUser.id;
     adminId = adminUser.admin!.id;
     adminToken = TokenUtil.generateAccessToken({
@@ -71,17 +70,8 @@ describe("Course Module Endpoints", () => {
     });
 
     // 3. Create a Student User
-    const studentEmail = `student-course-${Date.now()}@test.com`;
-    const studentUser = await prisma.user.create({
-      data: {
-        email: studentEmail,
-        password: "password123",
-        firstName: "Student",
-        lastName: "Course",
-        role: UserRole.STUDENT,
-        isActive: true,
-        isEmailVerified: true,
-      },
+    const studentUser = await TestFactory.createStudent({
+        email: `student-course-${Date.now()}@test.com`,
     });
     studentUserId = studentUser.id;
     studentToken = TokenUtil.generateAccessToken({
@@ -91,39 +81,15 @@ describe("Course Module Endpoints", () => {
     });
 
     // 4. Create a Tutor User
-    const tutorEmail = `tutor-course-${Date.now()}@test.com`;
-    const tutorUser = await prisma.user.create({
-      data: {
-        email: tutorEmail,
-        password: "password123",
-        firstName: "Tutor",
-        lastName: "User",
-        role: UserRole.TUTOR,
-        isActive: true,
-        isEmailVerified: true,
-        tutor: {
-          create: {
-            staffId: `TUTOR-${Date.now()}`,
-          }
-        }
-      },
-      include: { tutor: true }
+    const tutorUser = await TestFactory.createTutor({
+        email: `tutor-course-${Date.now()}@test.com`,
+        tutor: { staffId: `TUTOR-${Date.now()}` }
     });
     testTutorId = tutorUser.tutor!.id;
   });
 
   afterAll(async () => {
-    // Cleanup - deleting users with cascade should handle admin records
-    await prisma.course.deleteMany({
-      where: { createdById: adminId }
-    });
-    await prisma.user.deleteMany({
-      where: { id: { in: [adminUserId, studentUserId] } }
-    });
-    await prisma.department.deleteMany({
-      where: { id: testDeptId }
-    });
-    await prisma.$disconnect();
+    await TestFactory.clearDatabase();
   });
 
   describe("POST /api/v1/courses", () => {
@@ -198,16 +164,10 @@ describe("Course Module Endpoints", () => {
   describe("GET /api/v1/courses/:id/cohorts", () => {
     it("should return all cohorts for a specific course", async () => {
       // 1. First, create a cohort for this course
-      await prisma.cohort.create({
-        data: {
+      // 1. First, create a cohort for this course
+      await TestFactory.createCohort(testCourseId, testTutorId, adminId, {
           name: "Test Cohort 1",
-          courseId: testCourseId,
-          tutorId: testTutorId,
-          startDate: new Date(),
-          endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), 
-          status: CohortStatus.UPCOMING,
-          createdById: adminId,
-        }
+          status: CohortStatus.UPCOMING
       });
 
       // 2. Now fetch it

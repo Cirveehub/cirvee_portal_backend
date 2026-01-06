@@ -1,15 +1,4 @@
-jest.mock("../../config/redis", () => ({
-  __esModule: true,
-  default: {
-    get: jest.fn(),
-    set: jest.fn(),
-    setex: jest.fn(),
-    del: jest.fn(),
-    quit: jest.fn(),
-    on: jest.fn(),
-  },
-  testRedis: jest.fn().mockResolvedValue(true),
-}));
+
 
 jest.mock("axios");
 
@@ -17,7 +6,8 @@ import request from "supertest";
 import app from "../../app";
 import prisma from "@config/database";
 import { TokenUtil } from "../../utils/token";
-import { UserRole } from "@prisma/client";
+import { UserRole, CohortStatus } from "@prisma/client";
+import { TestFactory } from "../../utils/factories";
 import axios from "axios";
 
 const mockedAxios = axios as jest.Mocked<typeof axios>;
@@ -55,192 +45,99 @@ describe("Payment Module - Complete Test Suite", () => {
   let installmentPaymentId: string;
 
   beforeAll(async () => {
+    await TestFactory.clearDatabase();
 
-      const dept = await prisma.department.create({
-        data: {
-          name: `Test-Dept-Announcement-${Date.now()}`,
-          description: "Test department for announcement tests",
-        },
-      });
-    
-      const [superAdmin, admin, tutor, student, student2, outsider] = await Promise.all([
-        prisma.user.create({
-          data: {
-            email: `superadmin-${Date.now()}@test.com`,
-            password: "password",
-            firstName: "Super",
-            lastName: "Admin",
-            role: UserRole.SUPER_ADMIN,
-            isActive: true,
-            isEmailVerified: true,
-            admin: {
-              create: {
-                staffId: `STAFF-SUPERADMIN-${Date.now()}`,
-                departmentId: dept.id,
-                permissions: ["ALL"],
-              }
-            }
-          },
-          include: { admin: true }
-        }),
-        prisma.user.create({
-          data: {
-            email: `admin-${Date.now()}@test.com`,
-            password: "password",
-            firstName: "Admin",
-            lastName: "User",
-            role: UserRole.ADMIN,
-            isActive: true,
-            isEmailVerified: true,
-            admin: {
-              create: {
-                staffId: `STAFF-ADMIN-${Date.now()}`,
-                departmentId: dept.id,
-                permissions: ["CREATE_ANNOUNCEMENT"],
-              }
-            }
-          },
-          include: { admin: true }
-        }),
-        prisma.user.create({
-          data: {
-            email: `tutor-${Date.now()}@test.com`,
-            password: "password",
-            firstName: "Tutor",
-            lastName: "User",
-            role: UserRole.TUTOR,
-            isActive: true,
-            isEmailVerified: true,
-            tutor: {
-              create: {
-                staffId: `STAFF-TUTOR-${Date.now()}`,
-                departmentId: dept.id,
-                expertise: ["Testing"],
-              }
-            }
-          },
-          include: { tutor: true }
-        }),
-        // CREATE STUDENT RECORDS FOR STUDENT USERS
-        prisma.user.create({
-          data: {
-            email: `student-${Date.now()}@test.com`,
-            password: "password",
-            firstName: "Student",
-            lastName: "User",
-            role: UserRole.STUDENT,
-            isActive: true,
-            isEmailVerified: true,
-            student: {
-              create: {
-                studentId: `STU-${Date.now()}-1`,
-              }
-            }
-          },
-          include: { student: true }
-        }),
-        prisma.user.create({
-          data: {
-            email: `student2-${Date.now()}@test.com`,
-            password: "password",
-            firstName: "Student2",
-            lastName: "User",
-            role: UserRole.STUDENT,
-            isActive: true,
-            isEmailVerified: true,
-            student: {
-              create: {
-                studentId: `STU-${Date.now()}-2`,
-              }
-            }
-          },
-          include: { student: true }
-        }),
-        prisma.user.create({
-          data: {
-            email: `outsider-${Date.now()}@test.com`,
-            password: "password",
-            firstName: "Out",
-            lastName: "Side",
-            role: UserRole.STUDENT,
-            isActive: true,
-            isEmailVerified: true,
-            student: {
-              create: {
-                studentId: `STU-${Date.now()}-3`,
-              }
-            }
-          },
-          include: { student: true }
-        }),
-      ]);
-    
-      superAdminId = superAdmin.id;
-      adminId = admin.admin!.id;
-      tutorId = tutor.tutor!.id;
-      studentId = student.student!.id;  
-      student2Id = student2.student!.id; 
-      outsiderId = outsider.student!.id;  
-    
-      superAdminToken = TokenUtil.generateAccessToken({ id: superAdmin.id, email: superAdmin.email, role: UserRole.SUPER_ADMIN });
-      adminToken = TokenUtil.generateAccessToken({ id: admin.id, email: admin.email, role: UserRole.ADMIN });
-      tutorToken = TokenUtil.generateAccessToken({ id: tutor.id, email: tutor.email, role: UserRole.TUTOR });
-      studentToken = TokenUtil.generateAccessToken({ id: student.id, email: student.email, role: UserRole.STUDENT });
-      student2Token = TokenUtil.generateAccessToken({ id: student2.id, email: student2.email, role: UserRole.STUDENT });
-      outsiderToken = TokenUtil.generateAccessToken({ id: outsider.id, email: outsider.email, role: UserRole.STUDENT });
-    
-      const course = await prisma.course.create({
-        data: {
-          title: "Cohort dependency course",
-          description: "Required for cohort",
-          syllabus: ["Topic 1"],
-          price: 50,
-          duration: 2,
-          createdById: adminId,
-        }
-      });
-    
-      const [cohort1, cohort2] = await Promise.all([
-        prisma.cohort.create({
-          data: {
-            name: `Test Cohort 1 - ${Date.now()}`,
-            startDate: new Date(),
-            endDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
-            courseId: course.id,
-            tutorId: tutorId,
-            createdById: adminId,
-          },
-        }),
-        prisma.cohort.create({
-          data: {
-            name: `Test Cohort 2 - ${Date.now()}`,
-            startDate: new Date(),
-            endDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
-            courseId: course.id,
-            tutorId: tutorId,
-            createdById: adminId,
-          },
-        }),
-      ]);
-    
-      cohort1Id = cohort1.id;
-      cohort2Id = cohort2.id;
-    
-      // Enroll students in cogorts
-      await Promise.all([
-        // prisma.enrollment.create({
-        //   data: { cohortId: cohort1Id, studentId, courseId: course.id },
-        // }),
-        prisma.enrollment.create({
-          data: { cohortId: cohort2Id, studentId: student2Id, courseId: course.id },
-        }),
-      ]);
+    const dept = await TestFactory.createDepartment({
+        name: `Test-Dept-Announcement-${Date.now()}`
+    });
 
-    // Mock Paystack responses
+    // Create Super Admin
+    const superAdmin = await TestFactory.createAdmin(dept.id, {
+        email: `superadmin-${Date.now()}@test.com`,
+        firstName: "Super",
+        admin: { staffId: `STAFF-SUPERADMIN-${Date.now()}` },
+        role: UserRole.SUPER_ADMIN
+    });
+    superAdminId = superAdmin.id;
+    superAdminToken = TokenUtil.generateAccessToken({ id: superAdmin.id, email: superAdmin.email, role: UserRole.SUPER_ADMIN });
+
+    // Create Admin
+    const admin = await TestFactory.createAdmin(dept.id, {
+        email: `admin-${Date.now()}@test.com`,
+        admin: { staffId: `STAFF-ADMIN-${Date.now()}`, permissions: ["CREATE_ANNOUNCEMENT"] }
+    });
+    adminId = admin.admin!.id;
+    const adminUserId = admin.id; // Capture User ID
+    adminToken = TokenUtil.generateAccessToken({ id: admin.id, email: admin.email, role: UserRole.ADMIN });
+
+    // Create Tutor
+    const tutor = await TestFactory.createTutor({
+        email: `tutor-${Date.now()}@test.com`,
+        tutor: { staffId: `STAFF-TUTOR-${Date.now()}`, departmentId: dept.id, expertise: ["Testing"] }
+    });
+    tutorId = tutor.tutor!.id;
+    tutorToken = TokenUtil.generateAccessToken({ id: tutor.id, email: tutor.email, role: UserRole.TUTOR });
+
+    // Create Students
+    const student = await TestFactory.createStudent({
+        email: `student-${Date.now()}@test.com`,
+        student: { studentId: `STU-${Date.now()}-1` }
+    });
+    studentId = student.student!.id;
+    studentUserId = student.id;
+    studentToken = TokenUtil.generateAccessToken({ id: student.id, email: student.email, role: UserRole.STUDENT });
+
+    const student2 = await TestFactory.createStudent({
+        email: `student2-${Date.now()}@test.com`,
+        firstName: "Student2",
+        student: { studentId: `STU-${Date.now()}-2` }
+    });
+    student2Id = student2.student!.id;
+    student2UserId = student2.id;
+    student2Token = TokenUtil.generateAccessToken({ id: student2.id, email: student2.email, role: UserRole.STUDENT });
+
+    const outsider = await TestFactory.createStudent({
+        email: `outsider-${Date.now()}@test.com`,
+        firstName: "Out",
+        lastName: "Side",
+        student: { studentId: `STU-${Date.now()}-3` }
+    });
+    outsiderId = outsider.student!.id;
+    outsiderToken = TokenUtil.generateAccessToken({ id: outsider.id, email: outsider.email, role: UserRole.STUDENT });
+
+    // Create Course and Cohort using User ID
+    // 5. Create Course
+    const course = await TestFactory.createCourse(adminUserId, {
+        title: "Cohort dependency course",
+        price: 500000, // 5000.00
+        duration: 2
+    });
+    courseId = course.id;
+
+    // 6. Create Cohort
+    const cohort = await TestFactory.createCohort(course.id, tutorId, adminUserId, {
+        name: `Test Cohort 1 - ${Date.now()}`,
+        startDate: new Date(),
+        endDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+        status: CohortStatus.ONGOING
+    });
+    cohortId = cohort.id;
+
+    const cohort2 = await TestFactory.createCohort(course.id, tutorId, adminUserId, {
+        name: `Test Cohort 2 - ${Date.now()}`,
+        startDate: new Date(),
+        endDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+        status: CohortStatus.ONGOING
+    });
+    cohort1Id = cohort.id; // Corrected assignment
+    cohort2Id = cohort2.id;
+
+    // Enrollments
+    await TestFactory.createEnrollment(student2Id, courseId, cohort2Id);
+
     // Mock Paystack responses
     (mockedAxios as any).mockImplementation((config: any) => {
       const method = config.method?.toUpperCase();
-      const url = config.url || "";
       
       if (method === "POST") {
         return Promise.resolve({
@@ -263,7 +160,7 @@ describe("Payment Module - Complete Test Suite", () => {
             status: true,
             data: {
               status: "success",
-              amount: 5000, // Default to 5000 kobo (50 naira)
+              amount: 5000, 
               gateway_response: "Successful",
               channel: "card",
             },
@@ -277,18 +174,7 @@ describe("Payment Module - Complete Test Suite", () => {
 
 
   afterAll(async () => {
-    await prisma.paymentAuditLog.deleteMany();
-    await prisma.paymentTransaction.deleteMany();
-    await prisma.paymentRefund.deleteMany();
-    await prisma.payment.deleteMany();
-    await prisma.enrollment.deleteMany();
-    await prisma.cohort.deleteMany();
-    await prisma.course.deleteMany();
-    await prisma.student.deleteMany();
-    await prisma.tutor.deleteMany();
-    await prisma.admin.deleteMany();
-    await prisma.user.deleteMany();
-    await prisma.$disconnect();
+    await TestFactory.clearDatabase();
   });
 
   //  PAYMENT INITIATION 

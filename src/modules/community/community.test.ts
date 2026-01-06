@@ -11,11 +11,24 @@ jest.mock("../../config/redis", () => ({
   testRedis: jest.fn().mockResolvedValue(true),
 }));
 
+jest.mock("bullmq", () => ({
+  Queue: jest.fn().mockImplementation(() => ({
+    add: jest.fn(),
+    close: jest.fn(),
+    on: jest.fn(),
+  })),
+  Worker: jest.fn().mockImplementation(() => ({
+    close: jest.fn(),
+    on: jest.fn(),
+  })),
+}));
+
 import request from "supertest";
 import app from "../../app";
 import prisma from "@config/database";
 import { TokenUtil } from "../../utils/token";
 import { UserRole } from "@prisma/client";
+import { TestFactory } from "../../utils/factories";
 
 describe("Community Module - Complete Test Suite", () => {
   let adminToken: string;
@@ -42,99 +55,78 @@ describe("Community Module - Complete Test Suite", () => {
   let replyId: string;
 
   beforeAll(async () => {
+    await TestFactory.clearDatabase();
+    
     // Create test users
-    const [superAdmin, admin, tutor, student, student2, outsider] = await Promise.all([
-      prisma.user.create({
-        data: {
-          email: `superadmin-${Date.now()}@test.com`,
-          password: "password",
-          firstName: "Super",
-          lastName: "Admin",
-          role: UserRole.SUPER_ADMIN,
-          isActive: true,
-          isEmailVerified: true,
-        },
-      }),
-      prisma.user.create({
-        data: {
-          email: `admin-${Date.now()}@test.com`,
-          password: "password",
-          firstName: "Admin",
-          lastName: "User",
-          role: UserRole.ADMIN,
-          isActive: true,
-          isEmailVerified: true,
-        },
-      }),
-      prisma.user.create({
-        data: {
-          email: `tutor-${Date.now()}@test.com`,
-          password: "password",
-          firstName: "Tutor",
-          lastName: "User",
-          role: UserRole.TUTOR,
-          isActive: true,
-          isEmailVerified: true,
-        },
-      }),
-      prisma.user.create({
-        data: {
-          email: `student-${Date.now()}@test.com`,
-          password: "password",
-          firstName: "Student",
-          lastName: "User",
-          role: UserRole.STUDENT,
-          isActive: true,
-          isEmailVerified: true,
-        },
-      }),
-      prisma.user.create({
-        data: {
-          email: `student2-${Date.now()}@test.com`,
-          password: "password",
-          firstName: "Student2",
-          lastName: "User",
-          role: UserRole.STUDENT,
-          isActive: true,
-          isEmailVerified: true,
-        },
-      }),
-      prisma.user.create({
-        data: {
-          email: `outsider-${Date.now()}@test.com`,
-          password: "password",
-          firstName: "Out",
-          lastName: "Side",
-          role: UserRole.STUDENT,
-          isActive: true,
-          isEmailVerified: true,
-        },
-      }),
-    ]);
+    // 1. Super Admin
+    const superAdminUser = await TestFactory.createAdmin(undefined, {
+      role: UserRole.SUPER_ADMIN,
+      firstName: "Super",
+      lastName: "Admin",
+      admin: { permissions: ["*"] }
+    });
 
-    superAdminId = superAdmin.id;
-    adminId = admin.id;
-    tutorId = tutor.id;
-    studentId = student.id;
-    student2Id = student2.id;
-    outsiderId = outsider.id;
+    // 2. Admin
+    const adminUser = await TestFactory.createAdmin(undefined, {
+      role: UserRole.ADMIN,
+      firstName: "Admin",
+      lastName: "User",
+      admin: { permissions: ["*"] }
+    });
 
-    superAdminToken = TokenUtil.generateAccessToken({ id: superAdminId, email: superAdmin.email, role: UserRole.SUPER_ADMIN });
-    adminToken = TokenUtil.generateAccessToken({ id: adminId, email: admin.email, role: UserRole.ADMIN });
-    tutorToken = TokenUtil.generateAccessToken({ id: tutorId, email: tutor.email, role: UserRole.TUTOR });
-    studentToken = TokenUtil.generateAccessToken({ id: studentId, email: student.email, role: UserRole.STUDENT });
-    student2Token = TokenUtil.generateAccessToken({ id: student2Id, email: student2.email, role: UserRole.STUDENT });
-    outsiderToken = TokenUtil.generateAccessToken({ id: outsiderId, email: outsider.email, role: UserRole.STUDENT });
+    // 3. Tutor
+    const tutorUser = await TestFactory.createTutor({
+      firstName: "Tutor",
+      lastName: "User"
+    });
+
+    // 4. Students
+    const studentUser = await TestFactory.createStudent({
+      firstName: "Student",
+      lastName: "User"
+    });
+
+    const student2User = await TestFactory.createStudent({
+      firstName: "Student2", 
+      lastName: "User"
+    });
+
+    const outsiderUser = await TestFactory.createStudent({
+      firstName: "Out", 
+      lastName: "Side"
+    });
+
+    superAdminId = superAdminUser.id;
+    adminId = adminUser.admin!.id; // Note: TestFactory.createAdmin returns User, but we need admin ID for community linking if needed, but here it looks like mostly token based or just user IDs?
+    // Wait, the original test sets adminId = admin.id (User ID) NOT admin.admin.id?
+    // Let's double check line 116: adminId = admin.id; -- YES, User ID.
+    // Line 115: superAdminId = superAdmin.id; -- YES, User ID.
+    // Line 117: tutorId = tutor.id; -- YES, User ID.
+    
+    // Actually, looking at usages:
+    // create public community -> set Authorization adminToken
+    // create private community -> set Authorization adminToken
+    
+    // So for Community module, it seems to rely on User IDs primarily or implied via token.
+    // Let's re-read the original assignment carefully.
+    
+    superAdminId = superAdminUser.id;
+    adminId = adminUser.id;
+    tutorId = tutorUser.id;
+    studentId = studentUser.id;
+    student2Id = student2User.id;
+    outsiderId = outsiderUser.id;
+
+    superAdminToken = TokenUtil.generateAccessToken({ id: superAdminId, email: superAdminUser.email, role: UserRole.SUPER_ADMIN });
+    adminToken = TokenUtil.generateAccessToken({ id: adminId, email: adminUser.email, role: UserRole.ADMIN });
+    tutorToken = TokenUtil.generateAccessToken({ id: tutorId, email: tutorUser.email, role: UserRole.TUTOR });
+    studentToken = TokenUtil.generateAccessToken({ id: studentId, email: studentUser.email, role: UserRole.STUDENT });
+    student2Token = TokenUtil.generateAccessToken({ id: student2Id, email: student2User.email, role: UserRole.STUDENT });
+    outsiderToken = TokenUtil.generateAccessToken({ id: outsiderId, email: outsiderUser.email, role: UserRole.STUDENT });
   });
 
   afterAll(async () => {
-    await prisma.postLike.deleteMany();
-    await prisma.comment.deleteMany();
-    await prisma.post.deleteMany();
-    await prisma.communityMember.deleteMany();
-    await prisma.community.deleteMany();
-    await prisma.user.deleteMany();
-    await prisma.$disconnect();
+    await TestFactory.clearDatabase();
   });
 
   //COMMUNITY CREATION
