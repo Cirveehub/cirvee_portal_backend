@@ -10,9 +10,9 @@ const transporter = nodemailer.createTransport({
     pass: process.env.SMTP_PASSWORD,
   },
   // Fix for connection timeouts
-  connectionTimeout: 10000, // 10 seconds
-  greetingTimeout: 5000,    // 5 seconds
-  socketTimeout: 10000,     // 10 seconds
+  connectionTimeout: 30000, // 30 seconds
+  greetingTimeout: 10000,   // 10 seconds
+  socketTimeout: 30000,     // 30 seconds
   family: 4,                // force IPv4
 } as any);
 
